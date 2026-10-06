@@ -49,11 +49,54 @@ function lite_placeholder_stub(string $mime): string {
   return match (TRUE) {
     $mime === 'image/svg+xml' => "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1200\" height=\"900\"><rect width=\"100%\" height=\"100%\" fill=\"#b8b8b8\"/><text x=\"50%\" y=\"50%\" font-size=\"48\" text-anchor=\"middle\" fill=\"#444\">{$label}</text></svg>\n",
     $mime === 'application/pdf' => "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 60>>stream\nBT /F1 24 Tf 72 700 Td ({$label}) Tj ET\nendstream\nendobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n",
+    $mime === 'application/xhtml+xml' => lite_placeholder_hocr(),
     str_starts_with($mime, 'application/xml'), str_starts_with($mime, 'text/xml'), str_ends_with($mime, '+xml') => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<placeholder>{$label}</placeholder>\n",
     str_starts_with($mime, 'application/json'), str_ends_with($mime, '+json') => "{\"placeholder\": \"{$label}\"}\n",
     $mime === 'text/html' => "<!doctype html><title>{$label}</title><p>{$label}</p>\n",
     default => "{$label}\n",
   };
+}
+
+/**
+ * Minimal valid hOCR page for application/xhtml+xml (Islandora's hOCR derivatives).
+ *
+ * The hOCR media file is indexed into Solr's OCR highlighting field, whose plugin rejects
+ * the whole document ("possible analysis error") when the file is not parseable hOCR.
+ */
+function lite_placeholder_hocr(): string {
+  $words = '';
+  $x = 100;
+  $right = $x;
+  foreach (explode(' ', LITE_PLACEHOLDER_LABEL) as $i => $word) {
+    $x1 = $x + 40 * strlen($word);
+    $words .= sprintf('<span class="ocrx_word" id="word_1_%d" title="bbox %d 400 %d 500; x_wconf 100">%s</span> ', $i + 1, $x, $x1, htmlspecialchars($word, ENT_XML1));
+    $right = $x1;
+    $x = $x1 + 20;
+  }
+  $words = rtrim($words);
+  $title = htmlspecialchars(LITE_PLACEHOLDER_LABEL, ENT_XML1);
+  return <<<HOCR
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>{$title}</title>
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
+<meta name="ocr-system" content="lite-placeholder"/>
+<meta name="ocr-capabilities" content="ocr_page ocr_carea ocr_par ocr_line ocrx_word"/>
+</head>
+<body>
+<div class="ocr_page" id="page_1" title="bbox 0 0 1200 900; ppageno 0">
+<div class="ocr_carea" id="block_1_1" title="bbox 100 400 {$right} 500">
+<p class="ocr_par" id="par_1_1" title="bbox 100 400 {$right} 500">
+<span class="ocr_line" id="line_1_1" title="bbox 100 400 {$right} 500">{$words}</span>
+</p>
+</div>
+</div>
+</body>
+</html>
+
+HOCR;
 }
 
 /**

@@ -16,6 +16,8 @@
 
 use Drupal\Core\File\FileExists;
 
+require_once __DIR__ . '/lite-placeholders.inc.php';
+
 $fileSystem = \Drupal::service('file_system');
 $database = \Drupal::database();
 $templateDir = $fileSystem->realpath('temporary://') . '/lite-placeholders-tmp';
@@ -54,6 +56,7 @@ $extensions = [
   'image/tiff' => 'tif', 'image/jp2' => 'jp2', 'application/pdf' => 'pdf',
   'audio/mpeg' => 'mp3', 'audio/x-wav' => 'wav', 'audio/wav' => 'wav', 'audio/ogg' => 'ogg', 'audio/mp4' => 'm4a',
   'video/mp4' => 'mp4', 'video/quicktime' => 'mov', 'video/webm' => 'webm',
+  'application/xhtml+xml' => 'xhtml',
 ];
 
 // drush php:script includes this file inside a method, so no globals: closures instead.
@@ -73,9 +76,11 @@ $templateFor = function (string $mime) use (&$templates, $templateDir, $imageArg
       }
     }
     if (!file_exists($out)) {
-      $body = str_starts_with($mime, 'application/xml') || str_starts_with($mime, 'text/xml')
-        ? "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<placeholder>{$label}</placeholder>\n"
-        : "{$label}\n";
+      $body = match (TRUE) {
+        $mime === 'application/xhtml+xml' => lite_placeholder_hocr(),
+        str_starts_with($mime, 'application/xml') || str_starts_with($mime, 'text/xml') => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<placeholder>{$label}</placeholder>\n",
+        default => "{$label}\n",
+      };
       file_put_contents($out, $body);
     }
   }

@@ -240,6 +240,8 @@ upstream (remote `upstream` if present, else `origin`).
 | Cantaloupe 500, alias resolves to 127.0.0.1 inside containers | `traefik` not recreated after the alias was added | `site-up` runs `docker compose up -d --no-deps traefik` |
 | private hero images 403 for anonymous | shared placeholder URI; access checked on the first matching file row | per-row symlink paths |
 | logo / inline images 404 | not managed files | `ensure-referenced-files.php` |
+| indexing "Couldn't index items"; Solr 400 "possible analysis error" | the generic `<placeholder>` XML lands in the hOCR field and the OCR highlighting plugin rejects the document | `application/xhtml+xml` placeholders are a minimal valid hOCR page (`lite_placeholder_hocr()`) |
+| server page: "error ... retrieve additional information ... endpoint not found (404)" | Solr 10 dropped `admin/mbeans`, which search_api_solr 4.4 calls for stats | cosmetic; ping, core and indexing are unaffected |
 | `/themes/<dir>/images/...` 404 | theme staged under `web/themes/custom/` | stage at `web/themes/<name>/` |
 | media 404 after `site-reset` with a post-relink dump | rows already generic, files not regenerated | relink recreates files/symlinks for already-generic rows |
 | theme check lists `name: 0` | BSD `sed`/`grep` have no `\s` | POSIX classes `[[:space:]]` |
