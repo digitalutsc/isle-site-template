@@ -1,0 +1,15 @@
+# Keep host-side artefacts of the site clone out of the build context.
+rootfs/var/www/drupal/.git
+rootfs/var/www/drupal/vendor
+rootfs/var/www/drupal/web/core
+rootfs/var/www/drupal/web/modules/contrib
+rootfs/var/www/drupal/web/themes/contrib
+rootfs/var/www/drupal/web/profiles/contrib
+rootfs/var/www/drupal/web/libraries
+rootfs/var/www/drupal/web/sites/*/files
+rootfs/var/www/drupal/web/sites/*/private
+rootfs/var/www/drupal/web/sites/*/settings.php
+rootfs/var/www/drupal/web/sites/*/settings.local.php
+rootfs/var/www/drupal/drush/contrib
+rootfs/var/www/drupal/.env
+rootfs/var/www/drupal/.idea

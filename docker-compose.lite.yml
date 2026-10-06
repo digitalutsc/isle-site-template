@@ -1,0 +1,52 @@
+# Islandora Lite override for the upstream docker-compose.yml.
+#
+# Symlinked as docker-compose.override.yml by `make lite-init` (the symlink is
+# git-ignored upstream). Nothing in the upstream file is edited: services we do not
+# need are moved into the "disabled" profile, and the drupal service is pointed at
+# the Lite build context. Re-enable one ad hoc with:
+#   docker compose --profile disabled up -d <service>
+#
+# After `make lite-upstream-pull`, check docker-compose.yml for new services and add
+# them to the disabled list below if Lite does not need them.
+services:
+  # --- disabled, not removed -------------------------------------------------
+  activemq:
+    profiles: ["disabled"]
+  alpaca:
+    profiles: ["disabled"]
+  crayfits:
+    profiles: ["disabled"]
+  fcrepo:
+    profiles: ["disabled"]
+  # fits stays enabled: the Lite site's media_fits module calls it directly at
+  # http://fits:8080/fits/examine (config/sync/media_fits.fitsconfig.yml). crayfits
+  # (the Alpaca microservice in front of it) is not needed and stays disabled.
+  homarus:
+    profiles: ["disabled"]
+  houdini:
+    profiles: ["disabled"]
+  hypercube:
+    profiles: ["disabled"]
+  mergepdf:
+    profiles: ["disabled"]
+  milliner:
+    profiles: ["disabled"]
+
+  # --- enabled: drupal (Lite), mariadb, solr, blazegraph, cantaloupe, fits, traefik ----
+  drupal:
+    build:
+      context: ./lite/drupal
+    environment:
+      # No Fedora and no ActiveMQ in Lite: unset so the image helpers skip them.
+      DRUPAL_DEFAULT_BROKER_URL: !reset null
+      DRUPAL_DEFAULT_FCREPO_HOST: !reset null
+      DRUPAL_DEFAULT_FCREPO_PORT: !reset null
+      DRUPAL_DEFAULT_FCREPO_URL: !reset null
+      DRUPAL_DEFAULT_NAME: Islandora Lite
+      # Solr core stays "default" (upstream value, shared config volume at
+      # /opt/solr/server/solr/default). The exported config says ISLANDORA; the
+      # runtime override in lite/drupal/rootfs/etc/islandora/lite/settings.lite.php
+      # points search_api at DRUPAL_DEFAULT_SOLR_CORE instead. Do not mount the
+      # config volume at a second path: Solr then sees the same core twice and its
+      # CoreContainer shuts down on restart.
+      DRUPAL_DEFAULT_TRIPLESTORE_NAMESPACE: islandora

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Minimal stand-in for GNU `timeout DURATION COMMAND [ARG]...` on hosts without it
+# (macOS). Upstream scripts/ping.sh, up.sh and generate-certs.sh call `timeout`.
+# custom.Makefile puts this directory on PATH only when `timeout` is missing.
+# DURATION must be a whole number of seconds (upstream uses 5 and 10).
+exec perl -e 'my $t = shift @ARGV; alarm $t; exec @ARGV or die "timeout: cannot exec $ARGV[0]: $!\n";' -- "$@"

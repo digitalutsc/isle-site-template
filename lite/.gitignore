@@ -1,0 +1,3 @@
+# The Islandora Lite site is its own repository (digitalutsc/islandora-lite-site),
+# cloned here by `make lite-site`. Never commit it into this repo.
+drupal/rootfs/var/www/drupal/
