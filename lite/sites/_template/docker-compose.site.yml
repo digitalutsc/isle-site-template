@@ -90,8 +90,10 @@ services:
       DRUPAL_DEFAULT_DB_USER: __DB__
       DRUPAL_DEFAULT_SITE_URL: __DOMAIN__
       DRUSH_OPTIONS_URI: ${URI_SCHEME}://__DOMAIN__
-      # Shared services of the stack.
-      DRUPAL_DEFAULT_CANTALOUPE_URL: ${URI_SCHEME}://${DOMAIN}/cantaloupe/iiif/2
+      # Shared services of the stack. Cantaloupe is reached through this site's own host
+      # (router __SITE__-cantaloupe below): Mirador sends a `token` header when logged in,
+      # which Cantaloupe's CORS preflight rejects, so the viewer must stay same-origin.
+      DRUPAL_DEFAULT_CANTALOUPE_URL: ${URI_SCHEME}://__DOMAIN__/cantaloupe/iiif/2
       DRUPAL_DEFAULT_SOLR_CORE: __CORE__
       DRUPAL_DEFAULT_TRIPLESTORE_NAMESPACE: __SITE__
       # Never install: the database comes from the handover.
@@ -121,6 +123,17 @@ services:
       traefik.http.routers.__SITE__-https.entrypoints: https
       traefik.http.routers.__SITE__-https.service: __SITE__
       traefik.http.routers.__SITE__-https.tls: "true"
+      # The shared Cantaloupe at __DOMAIN__/cantaloupe (service and middleware from the
+      # upstream conf/traefik/cantaloupe.yml).
+      traefik.http.routers.__SITE__-cantaloupe-http.rule: "Host(`__DOMAIN__`) && PathPrefix(`/cantaloupe`)"
+      traefik.http.routers.__SITE__-cantaloupe-http.entrypoints: http
+      traefik.http.routers.__SITE__-cantaloupe-http.service: cantaloupe@file
+      traefik.http.routers.__SITE__-cantaloupe-http.middlewares: cantaloupe@file
+      traefik.http.routers.__SITE__-cantaloupe-https.rule: "Host(`__DOMAIN__`) && PathPrefix(`/cantaloupe`)"
+      traefik.http.routers.__SITE__-cantaloupe-https.entrypoints: https
+      traefik.http.routers.__SITE__-cantaloupe-https.service: cantaloupe@file
+      traefik.http.routers.__SITE__-cantaloupe-https.middlewares: cantaloupe@file
+      traefik.http.routers.__SITE__-cantaloupe-https.tls: "true"
     secrets:
       - source: CERT_PUBLIC_KEY
       - source: CERT_AUTHORITY

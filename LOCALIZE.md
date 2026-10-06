@@ -35,7 +35,9 @@ One Compose project (`isle-lite`). Shared: `drupal` (the Lite dev site), `mariad
   so Compose builds `drupal` first) plus the site's `config/sync`, themes and `site-files/`,
   and a localize first-start script instead of the Lite install. Served by Traefik at
   `<site>.islandora.io`; the hostname is also a network alias on `traefik` so Cantaloupe,
-  FITS and the indexer reach the site from inside the network.
+  FITS and the indexer reach the site from inside the network. The shared Cantaloupe is
+  also routed at `<site>.islandora.io/cantaloupe` and the site uses that as its IIIF server, so
+  the viewer stays same-origin.
 - Both services live in the Compose profile `<site>`; the site's compose file and profile
   are listed in `.env` (`COMPOSE_FILE`, `COMPOSE_PROFILES`) by `make site-enable`.
 
@@ -242,6 +244,7 @@ upstream (remote `upstream` if present, else `origin`).
 | `WARN: no uid 1 account` | `drush sql:query` prints a trailing blank line | `awk 'NF {v=$0} END {print v}'` |
 | `make lite-upstream-check` cannot fetch | SSH remote without a key in this shell | fetch failure is a warning; compare against the last fetched ref |
 | `make up` on macOS fails/hangs after install | upstream scripts need GNU `timeout` | `lite/bin/timeout` on PATH when missing |
+| viewer: CORS "Request header field token is not allowed" (logged in) | Mirador sends `Authorization` + `token`; Cantaloupe's preflight allows only `Authorization`, and `islandora.io/cantaloupe` is cross-origin for `<site>.islandora.io` | each site routes `/cantaloupe` on its own host (`<site>-cantaloupe` router) and uses it as `DRUPAL_DEFAULT_CANTALOUPE_URL` |
 
 ## 12. History
 
