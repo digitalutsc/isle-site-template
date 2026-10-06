@@ -4,7 +4,7 @@
 LITE_SITE_REPO ?= https://github.com/digitalutsc/islandora-lite-site.git
 LITE_SITE_BRANCH ?= drupal-11
 LITE_SITE_DIR := lite/drupal/rootfs/var/www/drupal
-LITE_OWN_FILES := lite custom.Makefile docker-compose.lite.yml INTENT.md README.lite.md
+LITE_OWN_FILES := lite custom.Makefile docker-compose.lite.yml README.lite.md LOCALIZE.md
 LITE_EXEC := docker compose exec -T drupal with-contenv bash -lc
 
 # Upstream scripts (ping.sh, up.sh, generate-certs.sh) need GNU `timeout`, which macOS
@@ -60,14 +60,80 @@ lite-status: ## Lite: upstream status plus the active service list
 	echo "Active services: $$(docker compose config --services | sort | tr '\n' ' ')"
 	echo "Disabled (profile): $$(docker compose --profile disabled config --services | sort | comm -13 <(docker compose config --services | sort) - | tr '\n' ' ')"
 
+# Remote that carries the pristine isle-site-template: "upstream" when present (recommended:
+# git remote add upstream https://github.com/Islandora-Devops/isle-site-template), else "origin".
+LITE_UPSTREAM_REMOTE ?= $(shell git remote get-url upstream >/dev/null 2>&1 && echo upstream || echo origin)
+LITE_UPSTREAM_BRANCH ?= main
+
 lite-upstream-check: ## Lite: prove no upstream-tracked file is modified (prints nothing when clean)
-	git fetch -q upstream
-	git diff --stat upstream/main -- . $(foreach f,$(LITE_OWN_FILES),':(exclude)$(f)')
+	git fetch -q $(LITE_UPSTREAM_REMOTE) $(LITE_UPSTREAM_BRANCH) || echo "warn: could not fetch $(LITE_UPSTREAM_REMOTE); comparing against the last fetched $(LITE_UPSTREAM_REMOTE)/$(LITE_UPSTREAM_BRANCH)"
+	git diff --stat $(LITE_UPSTREAM_REMOTE)/$(LITE_UPSTREAM_BRANCH) -- . $(foreach f,$(LITE_OWN_FILES),':(exclude)$(f)')
 	git status --short -- . $(foreach f,$(LITE_OWN_FILES),':(exclude)$(f)') | grep -v '^??' || true
 
-lite-upstream-pull: ## Lite: merge upstream/main, then list mirrored upstream files that changed
-	git fetch upstream
-	git merge --no-edit upstream/main
+lite-upstream-pull: ## Lite: merge $(LITE_UPSTREAM_REMOTE)/main, then list mirrored upstream files that changed
+	git fetch $(LITE_UPSTREAM_REMOTE) $(LITE_UPSTREAM_BRANCH)
+	git merge --no-edit $(LITE_UPSTREAM_REMOTE)/$(LITE_UPSTREAM_BRANCH)
 	echo ""
-	echo "Upstream files mirrored by Lite that changed in this pull (port by hand, see INTENT.md §7):"
+	echo "Upstream files mirrored by Lite that changed in this pull (port by hand, see README.lite.md):"
 	git diff --stat ORIG_HEAD HEAD -- sample.env docker-compose.yml drupal/Dockerfile drupal/rootfs/etc || true
+
+# ---------------------------------------------------------------------------------------
+# Production-site replicas: lite/sites/<site>/ (each its own git repo). See LOCALIZE.md and
+# lite/sites/README.md. All targets take SITE=<name>; the work is done by lite/bin/lite-site.
+# ---------------------------------------------------------------------------------------
+LITE_SITE := lite/bin/lite-site
+.PHONY: site-add site-render site-enable site-disable site-build site-up site-down site-intake site-finalize site-placeholders site-users-from-lite site-drush site-shell site-login site-db-shell site-dump site-reset sites
+
+site-add: ## Site: scaffold lite/sites/$(SITE)/ (site.env, docker-compose.yml, README, .gitignore) for a new site repo
+	$(LITE_SITE) add $(SITE)
+
+site-render: ## Site: re-render lite/sites/$(SITE)/docker-compose.yml from its site.env
+	$(LITE_SITE) render $(SITE)
+
+site-enable: ## Site: add the site to COMPOSE_FILE / COMPOSE_PROFILES in .env
+	$(LITE_SITE) enable $(SITE)
+
+site-disable: ## Site: stop the site and remove it from COMPOSE_FILE / COMPOSE_PROFILES
+	$(LITE_SITE) disable $(SITE)
+
+site-intake: ## Site: verify code + themes, stage them, normalize the database handover in db/, write NOTES.md
+	$(LITE_SITE) intake $(SITE)
+
+site-build: ## Site: build the drupal-$(SITE) image (FROM the Lite image + staged config/sync, themes, site-files)
+	$(LITE_SITE) build $(SITE)
+
+site-up: ## Site: start db-$(SITE) + drupal-$(SITE) and wait for the first-start localization
+	$(LITE_SITE) up $(SITE)
+
+site-down: ## Site: stop and remove the two containers (volumes kept)
+	$(LITE_SITE) down $(SITE)
+
+site-finalize: ## Site: re-run the localization steps (re-point, Solr core, facets, updb, placeholders); FORCE=1 before first start
+	$(LITE_SITE) finalize $(SITE)
+
+site-placeholders: ## Site: (re)generate media placeholders; MODE=relink|per-file overrides site.env
+	$(LITE_SITE) placeholders $(SITE)
+
+site-users-from-lite: ## Site: replace the accounts of db-$(SITE) with the Lite site's (production accounts are never used)
+	$(LITE_SITE) users-from-lite $(SITE)
+
+site-drush: ## Site: drush in drupal-$(SITE), e.g. make site-drush SITE=memory CMD="status"
+	$(LITE_SITE) drush $(SITE) $(CMD)
+
+site-shell: ## Site: interactive shell in drupal-$(SITE)
+	$(LITE_SITE) shell $(SITE)
+
+site-login: ## Site: one-time login link for drupal-$(SITE)
+	$(LITE_SITE) login $(SITE)
+
+site-db-shell: ## Site: mysql shell in db-$(SITE)
+	$(LITE_SITE) db-shell $(SITE)
+
+site-dump: ## Site: mysqldump of db-$(SITE), normalized (no account rows), to DEST= (default lite/sites/$(SITE)/db/incoming/<site>-<date>.sql.xz)
+	$(LITE_SITE) dump $(SITE) $(DEST)
+
+site-reset: ## Site: DESTRUCTIVE for this site only: containers, volumes, image, stage/, normalized dump
+	$(LITE_SITE) reset $(SITE)
+
+sites: ## Site: list sites under lite/sites/ with enabled/running state
+	$(LITE_SITE) list

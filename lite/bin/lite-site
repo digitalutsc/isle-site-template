@@ -1,0 +1,364 @@
+#!/usr/bin/env bash
+#
+# Per-site operations for production-site replicas on isle-site-lite.
+# Normally called through `make site-<command> SITE=<site>` from the isle-site-lite root.
+#
+#   lite/bin/lite-site <command> <site> [args...]
+#
+# Commands: add render enable disable build up down intake finalize placeholders
+#           users-from-lite drush shell login db-shell dump reset list
+#
+# Design: see LOCALIZE.md and lite/sites/README.md. Everything about a site lives in
+# lite/sites/<site>/ (its own git repo). This script never clones code or themes: it
+# verifies that you put them there and tells you what is missing.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+SITES_DIR="lite/sites"
+TEMPLATE_DIR="$SITES_DIR/_template"
+BASE_COMPOSE_FILES="docker-compose.yml:docker-compose.lite.yml"
+
+RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; BLUE=$'\033[36m'; RESET=$'\033[0m'
+info()  { echo "${BLUE}==>${RESET} $*"; }
+ok()    { echo "${GREEN}ok${RESET}  $*"; }
+warn()  { echo "${YELLOW}warn${RESET} $*" >&2; }
+die()   { echo "${RED}error${RESET} $*" >&2; exit 1; }
+
+usage() {
+  sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  exit 1
+}
+
+cmd="${1:-}"; site="${2:-}"
+[ -n "$cmd" ] || usage
+if [ "$cmd" = "list" ]; then site="_"; fi
+[ -n "$site" ] || die "SITE is required, e.g. make site-$cmd SITE=memory"
+shift 2 || true
+case "$site" in
+  _) ;;
+  *[!a-z0-9_-]*|-*|_*) die "SITE must be lowercase letters, digits, '-' or '_' and not start with one (got '$site')" ;;
+esac
+SITE_DIR="$SITES_DIR/$site"
+SITE_COMPOSE="$SITE_DIR/docker-compose.yml"
+
+# ---------------------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------------------
+
+load_site_env() {
+  [ -f "$SITE_DIR/site.env" ] || die "$SITE_DIR/site.env not found. New site: make site-add SITE=$site. Existing site repo: git clone <site repo> $SITE_DIR"
+  set -a
+  # shellcheck disable=SC1090
+  . "$SITE_DIR/site.env"
+  set +a
+  : "${SITE_DOMAIN:=$site.islandora.io}"
+  : "${SITE_CODE_DIR:=$SITE_DIR/repo}"
+  : "${SITE_SOLR_CORE:=dsu_multisite}"
+  : "${SITE_THEMES:=}"
+  : "${SITE_DB_NAME:=$site}"
+  : "${SITE_NAME:=}"
+  : "${PROD_DOMAIN:=}"
+  : "${SKIP_TABLES:=cache_.*|cachetags|sessions|flood|semaphore|queue|batch|watchdog|advancedqueue|users|users_field_data|users_data|user__roles|user__user_picture|shortcut_set_users}"
+  : "${SITE_PLACEHOLDERS:=relink}"
+  : "${SITE_DB_BUFFER_POOL:=512M}"
+  export SITE_DOMAIN SITE_CODE_DIR SITE_SOLR_CORE SITE_THEMES SITE_DB_NAME SITE_NAME PROD_DOMAIN SKIP_TABLES SITE_PLACEHOLDERS SITE_DB_BUFFER_POOL
+}
+
+require_env_file() {
+  [ -f .env ] || die ".env not found: run make lite-init first"
+}
+
+env_get() {  # env_get KEY -> value from .env (quotes stripped), empty if absent
+  grep -E "^$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"' || true
+}
+
+env_set() {  # env_set KEY VALUE: replace or append the line in .env
+  local key="$1" val="$2"
+  if grep -qE "^$key=" .env; then
+    KEY="$key" VAL="$val" perl -pi -e 's/^\Q$ENV{KEY}\E=.*$/$ENV{KEY}=$ENV{VAL}/' .env
+  else
+    printf '%s=%s\n' "$key" "$val" >> .env
+  fi
+}
+
+env_unset() {
+  KEY="$1" perl -ni -e 'print unless /^\Q$ENV{KEY}\E=/' .env
+}
+
+list_join() { local IFS="$1"; shift; echo "$*"; }
+
+site_enabled() {
+  local cf; cf="$(env_get COMPOSE_FILE)"
+  case ":$cf:" in *":$SITE_COMPOSE:"*) return 0 ;; esac
+  return 1
+}
+
+compose() { docker compose "$@"; }
+
+site_exec() {  # site_exec '<shell command>' inside drupal-<site>
+  compose exec -T "drupal-$site" with-contenv bash -lc "$1"
+}
+
+db_exec() {  # db_exec '<shell command>' inside db-<site>
+  compose exec -T "db-$site" bash -c "$1"
+}
+
+require_site_running() {
+  local id; id="$(compose ps -q "drupal-$site" 2>/dev/null || true)"
+  [ -n "$id" ] || die "drupal-$site is not running: make site-up SITE=$site"
+}
+
+# ---------------------------------------------------------------------------------------
+# commands
+# ---------------------------------------------------------------------------------------
+
+cmd_add() {
+  [ -e "$SITE_DIR" ] && die "$SITE_DIR already exists (clone an existing site repo there, or pick another name)"
+  info "Scaffolding $SITE_DIR from $TEMPLATE_DIR"
+  mkdir -p "$SITE_DIR"/{db,themes,site-files,repo}
+  S="$site" perl -pe 's/__SITE__/$ENV{S}/g' "$TEMPLATE_DIR/site.env.sample" > "$SITE_DIR/site.env"
+  cp "$TEMPLATE_DIR/gitignore" "$SITE_DIR/.gitignore"
+  S="$site" perl -pe 's/__SITE__/$ENV{S}/g' "$TEMPLATE_DIR/README.site.md" > "$SITE_DIR/README.md"
+  cat > "$SITE_DIR/NOTES.md" <<EOF
+# $site: notes
+
+Created $(date +%F) with \`make site-add\`. \`make site-intake\` appends its assess report here.
+EOF
+  touch "$SITE_DIR/site-files/.gitkeep"
+  cmd_render
+  cat <<EOF
+
+${GREEN}Created $SITE_DIR${RESET}. Next:
+  1. edit $SITE_DIR/site.env (SITE_THEMES, SITE_NAME, PROD_DOMAIN, ...) then: make site-render SITE=$site
+  2. git clone <internal GitHub repo of the site>  $SITE_DIR/repo
+  3. put each theme named in SITE_THEMES under     $SITE_DIR/themes/<name>/
+  4. copy the database handover (mysqldump file or .tar.gz of .ibd files) into $SITE_DIR/db/
+  5. make site-intake SITE=$site && make site-build SITE=$site && make site-up SITE=$site
+  (make this folder a git repo of its own: cd $SITE_DIR && git init && git add -A && git commit -m "site $site")
+EOF
+}
+
+cmd_render() {
+  load_site_env
+  local name prod
+  name="$(printf '%s' "$SITE_NAME" | tr -d '"')"
+  prod="$(printf '%s' "$PROD_DOMAIN" | tr -d '"')"
+  S="$site" D="$SITE_DOMAIN" C="$SITE_SOLR_CORE" DB="$SITE_DB_NAME" N="$name" P="$prod" PH="$SITE_PLACEHOLDERS" B="$SITE_DB_BUFFER_POOL" \
+    perl -pe 's/__SITE__/$ENV{S}/g; s/__DOMAIN__/$ENV{D}/g; s/__CORE__/$ENV{C}/g; s/__DB__/$ENV{DB}/g; s/__NAME__/$ENV{N}/g; s/__PROD_DOMAIN__/$ENV{P}/g; s/__PLACEHOLDERS__/$ENV{PH}/g; s/__BUFFER__/$ENV{B}/g' \
+    "$TEMPLATE_DIR/docker-compose.site.yml" > "$SITE_COMPOSE"
+  ok "rendered $SITE_COMPOSE (domain $SITE_DOMAIN, core $SITE_SOLR_CORE, db $SITE_DB_NAME)"
+}
+
+cmd_enable() {
+  require_env_file
+  [ -f "$SITE_COMPOSE" ] || die "$SITE_COMPOSE not found (make site-add SITE=$site, or clone the site repo there)"
+  local cf profiles
+  cf="$(env_get COMPOSE_FILE)"; [ -n "$cf" ] || cf="$BASE_COMPOSE_FILES"
+  if ! site_enabled; then cf="$cf:$SITE_COMPOSE"; fi
+  env_set COMPOSE_FILE "$cf"
+  profiles="$(env_get COMPOSE_PROFILES)"
+  case ",$profiles," in
+    *",$site,"*) ;;
+    *) profiles="${profiles:+$profiles,}$site" ;;
+  esac
+  env_set COMPOSE_PROFILES "$profiles"
+  ok "enabled: COMPOSE_FILE=$cf COMPOSE_PROFILES=$profiles"
+}
+
+cmd_disable() {
+  require_env_file
+  if site_enabled; then
+    cmd_down || true
+  fi
+  local cf profiles new_cf=() new_p=() f p
+  cf="$(env_get COMPOSE_FILE)"
+  IFS=: read -r -a parts <<<"$cf"
+  for f in "${parts[@]}"; do [ "$f" = "$SITE_COMPOSE" ] || [ -z "$f" ] || new_cf+=("$f"); done
+  profiles="$(env_get COMPOSE_PROFILES)"
+  IFS=, read -r -a pparts <<<"$profiles"
+  for p in "${pparts[@]}"; do [ "$p" = "$site" ] || [ -z "$p" ] || new_p+=("$p"); done
+  if [ "${#new_p[@]}" -eq 0 ]; then
+    env_unset COMPOSE_FILE; env_unset COMPOSE_PROFILES
+    ok "disabled $site; no sites left, COMPOSE_FILE/COMPOSE_PROFILES removed from .env"
+  else
+    env_set COMPOSE_FILE "$(list_join : "${new_cf[@]}")"
+    env_set COMPOSE_PROFILES "$(list_join , "${new_p[@]}")"
+    ok "disabled $site; remaining profiles: $(list_join , "${new_p[@]}")"
+  fi
+}
+
+cmd_build() {
+  cmd_enable
+  load_site_env
+  [ -d "$SITE_DIR/stage/config/sync" ] || die "$SITE_DIR/stage/config/sync missing: run make site-intake SITE=$site first"
+  info "Building drupal-$site (Compose builds the Lite 'drupal' image first)"
+  compose build "drupal-$site"
+}
+
+wait_for_localized() {
+  local timeout="${LITE_SITE_UP_TIMEOUT:-5400}" waited=0 id state
+  info "Waiting for the first-start localization of drupal-$site (Install Completed; up to ${timeout}s)"
+  while true; do
+    id="$(compose ps -q "drupal-$site" 2>/dev/null || true)"
+    [ -n "$id" ] || die "drupal-$site container disappeared"
+    state="$(docker inspect -f '{{.State.Status}}' "$id")"
+    if [ "$state" != "running" ]; then
+      compose logs --no-log-prefix --tail 40 "drupal-$site" >&2
+      die "drupal-$site is $state; see the log above"
+    fi
+    if docker exec "$id" test -f /installed 2>/dev/null; then break; fi
+    if [ "$waited" -ge "$timeout" ]; then
+      compose logs --no-log-prefix --tail 40 "drupal-$site" >&2
+      die "timed out after ${timeout}s waiting for /installed in drupal-$site"
+    fi
+    sleep 10; waited=$((waited + 10))
+    if [ $((waited % 120)) -eq 0 ]; then
+      echo "  ... still localizing ($((waited / 60)) min): $(compose logs --no-log-prefix --tail 1 "drupal-$site" 2>/dev/null | cut -c1-120)"
+    fi
+  done
+  ok "drupal-$site localized"
+}
+
+cmd_up() {
+  cmd_enable
+  load_site_env
+  # The site's hostname is a network alias on traefik; a running traefik only gets it when
+  # recreated. Compose recreates it only if its config changed (no-op otherwise).
+  compose up -d --no-deps traefik >/dev/null 2>&1 || true
+  info "Starting db-$site and drupal-$site"
+  compose up -d --wait "db-$site" "drupal-$site"
+  wait_for_localized
+  local scheme; scheme="$(env_get URI_SCHEME)"; [ -n "$scheme" ] || scheme=http
+  echo
+  echo "---------------------------------------------------"
+  echo "Site available at: $scheme://$SITE_DOMAIN"
+  echo "---------------------------------------------------"
+  site_exec 'drush uli' || true
+}
+
+cmd_down() {
+  compose stop "drupal-$site" "db-$site" 2>/dev/null || true
+  compose rm -f "drupal-$site" "db-$site" 2>/dev/null || true
+  ok "stopped drupal-$site and db-$site (volumes kept)"
+}
+
+cmd_intake() {
+  load_site_env
+  exec lite/intake/intake.sh "$site" "$@"
+}
+
+cmd_finalize() {
+  require_site_running
+  site_exec "LITE_FINALIZE_MANUAL=1 FORCE=${FORCE:-} lite-site-finalize.sh"
+}
+
+cmd_placeholders() {
+  require_site_running
+  load_site_env
+  local mode="${MODE:-$SITE_PLACEHOLDERS}"
+  case "$mode" in
+    relink)   site_exec 'cd /var/www/drupal && drush php:script /opt/lite/scripts/relink-media-placeholders.php && drush php:script /opt/lite/scripts/ensure-referenced-files.php && drush cr' ;;
+    per-file) site_exec 'cd /var/www/drupal && drush php:script /opt/lite/scripts/make-placeholder-files.php && drush php:script /opt/lite/scripts/ensure-referenced-files.php && drush cr' ;;
+    *) die "MODE must be relink or per-file (got '$mode')" ;;
+  esac
+}
+
+cmd_users_from_lite() {
+  require_site_running
+  info "Replacing the accounts of $site with the Lite dev site's (production credentials are never used)"
+  site_exec 'lite-accounts-from-lite.sh && cd /var/www/drupal && drush cr'
+  site_exec 'cd /var/www/drupal && uid1=$(drush sql:query "SELECT name FROM users_field_data WHERE uid = 1" | awk "NF {v=\$0} END {print v}") && drush -y user:password "$uid1" "$(cat /run/secrets/DRUPAL_DEFAULT_ACCOUNT_PASSWORD)" && echo "uid 1 ($uid1) password = secrets/DRUPAL_DEFAULT_ACCOUNT_PASSWORD"' || true
+}
+
+cmd_drush() {
+  require_site_running
+  site_exec "cd /var/www/drupal && drush $*"
+}
+
+cmd_shell() {
+  require_site_running
+  compose exec "drupal-$site" with-contenv bash -l
+}
+
+cmd_login() {
+  require_site_running
+  site_exec 'drush uli'
+}
+
+cmd_db_shell() {
+  load_site_env
+  compose exec "db-$site" bash -c "mysql -uroot -p\"\$(cat /run/secrets/DB_ROOT_PASSWORD)\" $SITE_DB_NAME"
+}
+
+cmd_dump() {
+  load_site_env
+  local dest="${DEST:-${1:-$SITE_DIR/db/incoming/$site-$(date +%Y%m%d).sql.xz}}"
+  case "$dest" in *.sql.xz|*.sql.gz) ;; *) die "DEST must end in .sql.xz or .sql.gz" ;; esac
+  mkdir -p "$(dirname "$dest")"
+  local raw; raw="$(mktemp "${TMPDIR:-/tmp}/lite-dump.XXXXXX")"
+  info "Dumping $SITE_DB_NAME from db-$site (account rows are stripped by normalize-dump.sh)"
+  db_exec "mysqldump -uroot -p\"\$(cat /run/secrets/DB_ROOT_PASSWORD)\" --single-transaction --quick --routines --no-tablespaces --set-gtid-purged=OFF $SITE_DB_NAME" > "$raw"
+  lite/intake/normalize-dump.sh "$raw" "$dest"
+  rm -f "$raw"
+  ok "$(du -h "$dest" | cut -f1) written to $dest"
+}
+
+cmd_reset() {
+  load_site_env
+  local project; project="$(env_get COMPOSE_PROJECT_NAME)"; [ -n "$project" ] || project=isle-lite
+  local repo tag; repo="$(env_get REPOSITORY)"; tag="$(env_get TAG)"
+  if site_enabled; then cmd_down; fi
+  info "Removing volumes and image of $site"
+  for v in "db-$site-data" "drupal-$site-public" "drupal-$site-private"; do
+    docker volume rm "${project}_${v}" 2>/dev/null && echo "  removed volume ${project}_${v}" || true
+  done
+  if [ "$SITE_SOLR_CORE" = "$site" ]; then
+    docker volume rm "${project}_solr-core-$site" 2>/dev/null && echo "  removed volume ${project}_solr-core-$site" || true
+  else
+    warn "shared Solr core $SITE_SOLR_CORE kept (other sites may use it)"
+  fi
+  docker rmi "${repo:-islandora.io}/${project}-$site:${tag:-local}" 2>/dev/null && echo "  removed image ${repo:-islandora.io}/${project}-$site:${tag:-local}" || true
+  rm -rf "$SITE_DIR/stage" "$SITE_DIR/db-raw" "$SITE_DIR/db/$site.sql.xz"
+  ok "reset $site (site.env, site-files, NOTES.md, repo/, themes/ and db/incoming/ kept). Re-run: make site-intake SITE=$site"
+}
+
+cmd_list() {
+  local cf profiles d s state
+  cf="$(env_get COMPOSE_FILE)"; profiles="$(env_get COMPOSE_PROFILES)"
+  printf '%-14s %-10s %-10s %s\n' SITE ENABLED RUNNING DOMAIN
+  for d in "$SITES_DIR"/*/; do
+    s="$(basename "$d")"
+    [ "$s" = "_template" ] && continue
+    [ -f "$d/site.env" ] || continue
+    case ":$cf:" in *":$SITES_DIR/$s/docker-compose.yml:"*) state=yes ;; *) state=no ;; esac
+    running=no
+    if [ "$state" = yes ] && [ -n "$(docker compose ps -q "drupal-$s" 2>/dev/null || true)" ]; then running=yes; fi
+    printf '%-14s %-10s %-10s %s\n' "$s" "$state" "$running" "$(grep -E '^SITE_DOMAIN=' "$d/site.env" | cut -d= -f2- | tr -d '"')"
+  done
+  [ -n "$profiles" ] && echo "COMPOSE_PROFILES=$profiles"
+  return 0
+}
+
+case "$cmd" in
+  add) cmd_add ;;
+  render) cmd_render ;;
+  enable) cmd_enable ;;
+  disable) cmd_disable ;;
+  build) cmd_build ;;
+  up) cmd_up ;;
+  down) cmd_down ;;
+  intake) cmd_intake "$@" ;;
+  finalize) cmd_finalize ;;
+  placeholders) cmd_placeholders ;;
+  users-from-lite) cmd_users_from_lite ;;
+  drush) cmd_drush "$@" ;;
+  shell) cmd_shell ;;
+  login) cmd_login ;;
+  db-shell) cmd_db_shell ;;
+  dump) cmd_dump "$@" ;;
+  reset) cmd_reset ;;
+  list) cmd_list ;;
+  *) usage ;;
+esac

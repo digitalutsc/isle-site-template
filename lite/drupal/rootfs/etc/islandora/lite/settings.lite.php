@@ -61,6 +61,12 @@ $config['advancedqueue_runner.settings']['root_path'] = '/var/www/drupal';
 $config['media_thumbnails_video.settings']['ffmpeg'] = '/usr/bin/ffmpeg';
 $config['media_thumbnails_video.settings']['ffprobe'] = '/usr/bin/ffprobe';
 
+// Production sites may have the memcache module enabled; this image has no memcached
+// extension and no memcached service. Empty servers/bins switch the module off cleanly
+// (its own documented way), so pages do not throw MemcacheException.
+$settings['memcache']['servers'] = [];
+$settings['memcache']['bins'] = [];
+
 // JWT private key as provided by the image (configure_jwt_module imports the key config).
 if (file_exists('/opt/keys/jwt/private.key')) {
   $config['key.key.islandora_rsa_key']['key_provider_settings']['file_location'] = '/opt/keys/jwt/private.key';

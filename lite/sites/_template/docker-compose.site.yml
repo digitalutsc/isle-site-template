@@ -1,0 +1,158 @@
+# Production-site replica "__SITE__" on isle-site-lite.
+#
+# Rendered by `make site-add SITE=__SITE__` (and re-rendered by `make site-render`) from
+# lite/sites/_template/docker-compose.site.yml with the values of site.env. Every
+# site-specific value is a literal on purpose: Compose does not interpolate top-level
+# volume keys, and an unset variable would render an empty Traefik alias. ${...} below
+# only refers to variables that isle-site-lite's .env always defines.
+#
+# Joined into the project through COMPOSE_FILE in .env (`make site-enable`). Both site
+# services live in the Compose profile "__SITE__" (COMPOSE_PROFILES), so they only start
+# when the profile is active. Paths are relative to the isle-site-lite root, so this
+# folder must be lite/sites/__SITE__/.
+#
+# The db service is MySQL 8.0 on purpose: the handovers are MySQL 8.0 (.ibd files or
+# dumps with utf8mb4_0900_ai_ci), which neither MySQL 8.4 nor MariaDB load unchanged.
+
+volumes:
+  db-__SITE__-data: {}
+  drupal-__SITE__-public: {}
+  drupal-__SITE__-private: {}
+  solr-core-__CORE__: {}
+
+services:
+  db-__SITE__:
+    image: mysql:8.0
+    profiles: ["__SITE__"]
+    restart: unless-stopped
+    command: >-
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_0900_ai_ci
+      --innodb-buffer-pool-size=__BUFFER__
+      --innodb-redo-log-capacity=1G
+      --innodb-flush-log-at-trx-commit=0
+      --disable-log-bin
+      --max-allowed-packet=256M
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/DB_ROOT_PASSWORD
+      MYSQL_DATABASE: __DB__
+      MYSQL_USER: __DB__
+      MYSQL_PASSWORD_FILE: /run/secrets/DRUPAL_DEFAULT_DB_PASSWORD
+    secrets:
+      - DB_ROOT_PASSWORD
+      - DRUPAL_DEFAULT_DB_PASSWORD
+    healthcheck:
+      # TCP on purpose: while the entrypoint loads db/*.sql(.gz|.xz) the temporary server
+      # listens on the socket only, so this stays unhealthy until the data is in.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$(cat /run/secrets/DB_ROOT_PASSWORD)\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 15m
+    volumes:
+      - db-__SITE__-data:/var/lib/mysql
+      # The normalized dump written by `make site-intake` (db/__SITE__.sql.xz) is loaded on
+      # the first start of an empty data volume. Raw handover files are kept in db/incoming/.
+      - ./lite/sites/__SITE__/db:/docker-entrypoint-initdb.d:ro
+    networks:
+      default:
+
+  drupal-__SITE__:
+    profiles: ["__SITE__"]
+    restart: unless-stopped
+    tty: true
+    security_opt:
+      - label=type:container_runtime_t
+    build:
+      context: ./lite/site-image
+      additional_contexts:
+        # The Lite image built by the "drupal" service: same composer set by construction,
+        # and Compose builds "drupal" first.
+        lite: service:drupal
+        stage: ./lite/sites/__SITE__/stage
+        sitefiles: ./lite/sites/__SITE__/site-files
+    image: ${REPOSITORY}/${COMPOSE_PROJECT_NAME}-__SITE__:${TAG}
+    depends_on:
+      db-__SITE__:
+        condition: service_healthy
+      solr:
+        condition: service_healthy
+      cantaloupe:
+        condition: service_healthy
+      fits:
+        condition: service_started
+    environment:
+      DEVELOPMENT_ENVIRONMENT: ${DEVELOPMENT_ENVIRONMENT:-false}
+      DB_MYSQL_HOST: db-__SITE__
+      DB_MYSQL_PORT: 3306
+      DRUPAL_DEFAULT_DB_NAME: __DB__
+      DRUPAL_DEFAULT_DB_USER: __DB__
+      DRUPAL_DEFAULT_SITE_URL: __DOMAIN__
+      DRUSH_OPTIONS_URI: ${URI_SCHEME}://__DOMAIN__
+      # Shared services of the stack.
+      DRUPAL_DEFAULT_CANTALOUPE_URL: ${URI_SCHEME}://${DOMAIN}/cantaloupe/iiif/2
+      DRUPAL_DEFAULT_SOLR_CORE: __CORE__
+      DRUPAL_DEFAULT_TRIPLESTORE_NAMESPACE: __SITE__
+      # Never install: the database comes from the handover.
+      DRUPAL_DEFAULT_INSTALL_EXISTING_CONFIG: "false"
+      DRUPAL_DEFAULT_PROFILE: minimal
+      DRUPAL_DEFAULT_CONFIGDIR: /var/www/drupal/config/sync
+      DRUPAL_ENABLE_HTTPS: "false"
+      # Localize mode for the first-start script and lite-hydrate.sh.
+      LITE_SITE_MODE: localize
+      LITE_SITE_NAME: "__NAME__"
+      LITE_PROD_DOMAIN: "__PROD_DOMAIN__"
+      LITE_PLACEHOLDERS: "__PLACEHOLDERS__"
+      NGINX_REAL_IP_RECURSIVE: ${REVERSE_PROXY}
+      NGINX_SET_REAL_IP_FROM: ${FRONTEND_IP_1}
+      NGINX_SET_REAL_IP_FROM2: ${FRONTEND_IP_2}
+      NGINX_SET_REAL_IP_FROM3: ${FRONTEND_IP_3}
+    healthcheck:
+      start_period: 2m
+      retries: 10
+    labels:
+      traefik.enable: "true"
+      traefik.http.services.__SITE__.loadbalancer.server.port: "80"
+      traefik.http.routers.__SITE__-http.rule: "Host(`__DOMAIN__`)"
+      traefik.http.routers.__SITE__-http.entrypoints: http
+      traefik.http.routers.__SITE__-http.service: __SITE__
+      traefik.http.routers.__SITE__-https.rule: "Host(`__DOMAIN__`)"
+      traefik.http.routers.__SITE__-https.entrypoints: https
+      traefik.http.routers.__SITE__-https.service: __SITE__
+      traefik.http.routers.__SITE__-https.tls: "true"
+    secrets:
+      - source: CERT_PUBLIC_KEY
+      - source: CERT_AUTHORITY
+      - source: UID
+      - source: DB_ROOT_PASSWORD
+      - source: DRUPAL_DEFAULT_ACCOUNT_PASSWORD
+      - source: DRUPAL_DEFAULT_DB_PASSWORD
+      - source: DRUPAL_DEFAULT_SALT
+      - source: JWT_PRIVATE_KEY
+      - source: JWT_PUBLIC_KEY
+    volumes:
+      - drupal-__SITE__-public:/var/www/drupal/web/sites/default/files
+      - drupal-__SITE__-private:/var/www/drupal/private
+      # Solr core config is generated here by search_api_solr and read by the solr service.
+      - solr-core-__CORE__:/opt/solr/server/solr/__CORE__:z,rw
+    networks:
+      default:
+
+  # Shared services: the Solr core directory and the hostname alias. In shared-core mode
+  # (dsu_multisite) the mount is identical to the one in docker-compose.lite.yml, so
+  # enabling or disabling this site does not change the solr service.
+  solr:
+    volumes:
+      - type: volume
+        source: solr-core-__CORE__
+        target: /opt/solr/server/solr/__CORE__
+        volume:
+          nocopy: true
+
+  traefik:
+    networks:
+      default:
+        aliases:
+          # Cantaloupe, FITS and the indexer reach the site by this name inside the network.
+          - __DOMAIN__
