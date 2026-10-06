@@ -4,7 +4,7 @@
 LITE_SITE_REPO ?= https://github.com/digitalutsc/islandora-lite-site.git
 LITE_SITE_BRANCH ?= drupal-11
 LITE_SITE_DIR := lite/drupal/rootfs/var/www/drupal
-LITE_OWN_FILES := lite custom.Makefile docker-compose.lite.yml README.lite.md LOCALIZE.md
+LITE_OWN_FILES := lite custom.Makefile docker-compose.lite.yml README.lite.md LOCALIZE.md QUICKSTART.md
 LITE_EXEC := docker compose exec -T drupal with-contenv bash -lc
 
 # Upstream scripts (ping.sh, up.sh, generate-certs.sh) need GNU `timeout`, which macOS
@@ -82,7 +82,7 @@ lite-upstream-pull: ## Lite: merge $(LITE_UPSTREAM_REMOTE)/main, then list mirro
 # lite/sites/README.md. All targets take SITE=<name>; the work is done by lite/bin/lite-site.
 # ---------------------------------------------------------------------------------------
 LITE_SITE := lite/bin/lite-site
-.PHONY: site-add site-render site-check site-enable site-disable site-build site-up site-down site-intake site-finalize site-placeholders site-users-from-lite site-drush site-shell site-login site-db-shell site-dump site-reset sites
+.PHONY: site-add site-render site-check site-enable site-disable site-build site-up site-down site-intake site-deploy site-finalize site-placeholders site-users-from-lite site-drush site-shell site-login site-db-shell site-dump site-reset sites
 
 site-add: ## Site: scaffold lite/sites/$(SITE)/ (site.env, docker-compose.yml, README, NOTES.md) for a new site
 	$(LITE_SITE) add $(SITE)
@@ -107,6 +107,9 @@ site-build: ## Site: build the drupal-$(SITE) image (FROM the Lite image + stage
 
 site-up: ## Site: start db-$(SITE) + drupal-$(SITE) and wait for the first-start localization
 	$(LITE_SITE) up $(SITE)
+
+site-deploy: ## Site: site-intake + site-build + site-up in one step (stops at the first failure)
+	$(LITE_SITE) deploy $(SITE)
 
 site-down: ## Site: stop and remove the two containers (volumes kept)
 	$(LITE_SITE) down $(SITE)

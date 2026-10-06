@@ -92,6 +92,8 @@ isle-site-lite/
 
 ## 4. Per-site workflow
 
+Copy-paste version with rebuild and everyday commands: [QUICKSTART.md](QUICKSTART.md).
+
 ```bash
 # the stack (once)
 make lite-init && make lite-up
@@ -107,10 +109,8 @@ cp <handover: *.sql | *.sql.gz | *.sql.xz | *.tar.gz of .ibd> lite/sites/memory/
 # validate the manual inputs (read-only; repeat until it prints "Ready for intake")
 make site-check  SITE=memory
 
-# run
-make site-intake SITE=memory
-make site-build  SITE=memory
-make site-up     SITE=memory
+# run (site-intake + site-build + site-up; stops at the first failing step)
+make site-deploy SITE=memory
 make site-login  SITE=memory             # or log in as admin with secrets/DRUPAL_DEFAULT_ACCOUNT_PASSWORD
 ```
 
@@ -201,7 +201,8 @@ uid 1. `make site-users-from-lite SITE=<site>` repeats it. `db-<site>` runs with
 compose file, code, themes, database handover and host before intake), `site-enable`, `site-disable` (stops the site first:
 upstream `up.sh` uses `--remove-orphans`), `site-intake`, `site-build`, `site-up`
 (recreates `traefik` if its config changed, starts `db-<site>` + `drupal-<site>`, waits for
-`/installed`), `site-down`, `site-finalize`, `site-placeholders`, `site-users-from-lite`,
+`/installed`), `site-deploy` (`site-intake` + `site-build` + `site-up`), `site-down`,
+`site-finalize`, `site-placeholders`, `site-users-from-lite`,
 `site-drush CMD=`, `site-shell`, `site-login`, `site-db-shell`, `site-dump [DEST=]`
 (through the account filter, `.sql.xz`), `site-reset` (destructive for that site:
 containers, volumes, image, `stage/`, normalized dump; keeps `site.env`, `site-files/`,

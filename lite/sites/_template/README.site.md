@@ -21,9 +21,7 @@ Then, from the isle-site-lite root:
 
 ```bash
 make site-check  SITE=__SITE__   # validate the inputs above (read-only); repeat until "Ready for intake"
-make site-intake SITE=__SITE__   # verify code/themes, stage them, normalize the database to db/__SITE__.sql.xz, write NOTES.md
-make site-build  SITE=__SITE__   # image FROM the Lite image + this site's config/sync, themes, site-files
-make site-up     SITE=__SITE__   # start db-__SITE__ + drupal-__SITE__, first start localizes (updb, Solr, placeholders)
+make site-deploy SITE=__SITE__   # site-intake + site-build + site-up: stage code/themes, normalize the database, build the image, start; first start localizes (updb, Solr, placeholders)
 make site-login  SITE=__SITE__
 ```
 

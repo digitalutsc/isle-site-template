@@ -36,10 +36,10 @@ cp <handover file> lite/sites/memory/db/
 # validate the manual inputs (read-only; repeat until it prints "Ready for intake")
 make site-check  SITE=memory
 
-# run
-make site-intake SITE=memory          # verify + stage code and themes, normalize the database, NOTES.md
-make site-build  SITE=memory          # drupal-memory image
-make site-up     SITE=memory          # first start localizes: re-point services, Solr core, facets, updb, placeholders
+# run: intake (verify + stage code and themes, normalize the database, NOTES.md), build the
+# drupal-memory image, then start it (first start localizes: re-point services, Solr core,
+# facets, updb, placeholders). Separately: site-intake, site-build, site-up.
+make site-deploy SITE=memory
 make site-login  SITE=memory
 ```
 

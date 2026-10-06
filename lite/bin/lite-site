@@ -5,7 +5,7 @@
 #
 #   lite/bin/lite-site <command> <site> [args...]
 #
-# Commands: add render check enable disable build up down intake finalize placeholders
+# Commands: add render check enable disable build up down intake deploy finalize placeholders
 #           users-from-lite drush shell login db-shell dump reset list
 #
 # Design: see LOCALIZE.md and lite/sites/README.md. Everything about a site lives in
@@ -273,6 +273,14 @@ cmd_intake() {
   exec lite/intake/intake.sh "$site" "$@"
 }
 
+cmd_deploy() {  # intake + build + up in one go; stops at the first failing step
+  cmd_check || die "fix the problems above before intake (make site-check SITE=$site)"
+  echo
+  lite/intake/intake.sh "$site" "$@"
+  cmd_build
+  cmd_up
+}
+
 cmd_finalize() {
   require_site_running
   site_exec "LITE_FINALIZE_MANUAL=1 FORCE=${FORCE:-} lite-site-finalize.sh"
@@ -375,6 +383,7 @@ case "$cmd" in
   up) cmd_up ;;
   down) cmd_down ;;
   intake) cmd_intake "$@" ;;
+  deploy) cmd_deploy "$@" ;;
   finalize) cmd_finalize ;;
   placeholders) cmd_placeholders ;;
   users-from-lite) cmd_users_from_lite ;;

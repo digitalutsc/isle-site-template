@@ -72,6 +72,7 @@ The site-image and intake code depend only on the Lite image and the isle-buildk
 
 Each production Islandora Lite site runs as an add-on in `lite/sites/<site>/` (a local,
 git-ignored working folder): `make site-add SITE=<site>`, put the code, theme(s) and database handover in that
-folder, then `make site-intake`, `make site-build`, `make site-up` with `SITE=<site>`.
+folder, then `make site-deploy SITE=<site>` (`site-intake` + `site-build` + `site-up`).
+Copy-paste steps: `QUICKSTART.md`.
 Handovers are composer project + database only: files are replaced by generic placeholders
 and accounts by the Lite dev site's. See `lite/sites/README.md` and `LOCALIZE.md`.
