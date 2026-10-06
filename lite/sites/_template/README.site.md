@@ -1,14 +1,15 @@
 # __SITE__: production replica on isle-site-lite
 
-This folder is a site repo for [isle-site-lite](../../../README.lite.md). It is cloned into
-`lite/sites/__SITE__/` of an isle-site-lite checkout (the folder name must stay `__SITE__`)
-and driven with `make site-* SITE=__SITE__` from the isle-site-lite root.
+This folder was scaffolded by `make site-add SITE=__SITE__` in
+[isle-site-lite](../../../README.lite.md). It is a local working folder, git-ignored and not
+versioned (the folder name must stay `__SITE__`), driven with `make site-* SITE=__SITE__`
+from the isle-site-lite root.
 
-Tracked here: `site.env` (settings), `docker-compose.yml` (rendered from `site.env`,
-re-render with `make site-render`), `site-files/` (small public files named in config, such
-as the theme logo), `NOTES.md` (assess report and decisions).
+Here: `site.env` (settings), `docker-compose.yml` (rendered from `site.env`, re-render with
+`make site-render`), `site-files/` (small public files named in config, such as the theme
+logo), `NOTES.md` (assess report and decisions).
 
-Provided by you, never committed:
+Provided by you:
 
 | Where | What |
 | --- | --- |
@@ -19,6 +20,7 @@ Provided by you, never committed:
 Then, from the isle-site-lite root:
 
 ```bash
+make site-check  SITE=__SITE__   # validate the inputs above (read-only); repeat until "Ready for intake"
 make site-intake SITE=__SITE__   # verify code/themes, stage them, normalize the database to db/__SITE__.sql.xz, write NOTES.md
 make site-build  SITE=__SITE__   # image FROM the Lite image + this site's config/sync, themes, site-files
 make site-up     SITE=__SITE__   # start db-__SITE__ + drupal-__SITE__, first start localizes (updb, Solr, placeholders)

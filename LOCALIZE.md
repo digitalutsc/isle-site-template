@@ -16,10 +16,10 @@ Rules set by the owner:
 | Database comes as a `mysqldump` file **or** a `.tar.gz` of raw MySQL 8.0 `.ibd` files; both must work | `lite/intake/intake.sh` detects, `normalize-dump.sh` / `ibd-recover.sh` convert |
 | Files are never handed over; every media must point at a generic file of its type | `relink-media-placeholders.php` + `ensure-referenced-files.php` at first start |
 | Production accounts are never read or ported; accounts come from the Lite dev site | `normalize-dump.sh` drops their rows, `SKIP_TABLES` skips their tablespaces, `lite-accounts-from-lite.sh` copies the Lite accounts |
-| `composer.json` / `composer_site.json` / lock always from `islandora-lite-site`; the site repo contributes `config/sync` (+ custom code if any) | site image is `FROM` the Lite image |
+| `composer.json` / `composer_site.json` / lock always from `islandora-lite-site`; the site's composer project contributes `config/sync` (+ custom code if any) | site image is `FROM` the Lite image |
 | Solr layout configurable: shared core like prod (default `dsu_multisite`) or one per site | `SITE_SOLR_CORE` |
 | Site code and private themes are placed **manually**; nothing clones them for you | intake verifies and refuses with instructions |
-| Each site is its own git repo cloned into `lite/sites/<site>/` | `lite/.gitignore` ignores `sites/*` except `_template/` and `README.md` |
+| Each site is a local working folder `lite/sites/<site>/` made by `make site-add`, not versioned | `lite/.gitignore` ignores `sites/*` except `_template/` and `README.md` |
 | Several sites may run at once | per-site `drupal-<site>` + `db-<site>`, shared services, hostnames `<site>.islandora.io` |
 | Upstream files stay untouched | `make lite-upstream-check` prints nothing |
 
@@ -73,6 +73,7 @@ isle-site-lite/
     │           ├── make-placeholder-files.php           alternative mode: one file at every original path
     │           └── restore-user-tables.php              recreate missing account tables
     ├── intake/
+    │   ├── check.sh                validate the manual inputs (make site-check; also first step of intake)
     │   ├── intake.sh               verify code + themes, stage, database detect/convert, assess
     │   ├── normalize-dump.sh       any dump → db/<site>.sql.xz (no CREATE DATABASE/USE/DEFINER/GTID, no account rows)
     │   ├── ibd-recover.sh          .ibd tarball → throwaway mysql:8.0 → dump (uses import-ibd.sh, sdi2ddl.py, ibd2sql)
@@ -80,9 +81,9 @@ isle-site-lite/
     │   └── assess.sh               report appended to NOTES.md
     └── sites/
         ├── README.md               operator guide
-        ├── _template/              docker-compose.site.yml, site.env.sample, gitignore, README.site.md
-        └── <site>/                 a clone of the site's own repo (git-ignored here)
-            ├── site.env, docker-compose.yml, site-files/, NOTES.md, README.md, .gitignore   tracked in the site repo
+        ├── _template/              docker-compose.site.yml, site.env.sample, README.site.md
+        └── <site>/                 local working folder from `make site-add` (git-ignored, not versioned)
+            ├── site.env, docker-compose.yml, site-files/, NOTES.md, README.md
             ├── repo/               your clone of the site's composer project (= default SITE_CODE_DIR)
             ├── themes/<name>/      your clone/copy of each theme in SITE_THEMES
             ├── db/                 your handover file; intake moves it to db/incoming/ and writes db/<site>.sql.xz
@@ -97,14 +98,14 @@ make lite-init && make lite-up
 
 # a new site
 make site-add SITE=memory                  # scaffold lite/sites/memory/ (edit site.env, then: make site-render SITE=memory)
-cd lite/sites/memory && git init && git add -A && git commit -m "site memory" && cd -
-# or an existing site repo
-git clone <site repo> lite/sites/memory
 
 # your manual inputs
 git clone <internal GitHub repo> lite/sites/memory/repo                        # or set SITE_CODE_DIR
 git clone <theme repo> lite/sites/memory/themes/dsu_subtheme_barrioDepartments  # every name in SITE_THEMES
 cp <handover: *.sql | *.sql.gz | *.sql.xz | *.tar.gz of .ibd> lite/sites/memory/db/
+
+# validate the manual inputs (read-only; repeat until it prints "Ready for intake")
+make site-check  SITE=memory
 
 # run
 make site-intake SITE=memory
@@ -120,6 +121,8 @@ After editing: `make site-render SITE=<site>` (and `make site-up` to apply).
 
 ## 5. What intake does (`make site-intake SITE=<site>`)
 
+0. Runs the same validation as `make site-check` (`lite/intake/check.sh` plus the
+   rendered compose file against `site.env`) and stops, listing every problem, if it fails.
 1. Checks `site.env` and `docker-compose.yml` exist (folder name must equal `SITE`).
 2. Code: refuses unless `$SITE_CODE_DIR/config/sync/core.extension.yml` exists; stages
    `config/sync` and `web/{modules,themes}/custom` into `stage/`; records the git commit.
@@ -194,7 +197,8 @@ uid 1. `make site-users-from-lite SITE=<site>` repeats it. `db-<site>` runs with
 
 ## 9. Make targets (all take `SITE=`; `make help` lists them)
 
-`site-add`, `site-render`, `site-enable`, `site-disable` (stops the site first:
+`site-add`, `site-render`, `site-check` (read-only validation of `site.env`, the rendered
+compose file, code, themes, database handover and host before intake), `site-enable`, `site-disable` (stops the site first:
 upstream `up.sh` uses `--remove-orphans`), `site-intake`, `site-build`, `site-up`
 (recreates `traefik` if its config changed, starts `db-<site>` + `drupal-<site>`, waits for
 `/installed`), `site-down`, `site-finalize`, `site-placeholders`, `site-users-from-lite`,
@@ -256,3 +260,5 @@ upstream (remote `upstream` if present, else `origin`).
   and applied retroactively (production account rows removed from the replica, dumps and
   binary logs); home page review fixed private file access, logo/inline images, theme path.
   Details: `lite/sites/memory/NOTES.md`.
+- 2026-10-06: site folders are no longer their own git repos: `lite/sites/<site>/` is a
+  local working folder scaffolded by `make site-add` (no `git init`, no site-repo clone).

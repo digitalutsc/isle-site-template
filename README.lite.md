@@ -16,7 +16,7 @@ repo) plus the files below. Production-site replicas on top of it are described 
 | `lite/bin/` | `lite-site` (all `site-*` operations), `timeout` shim for macOS |
 | `lite/site-image/` | generic production-site image (FROM the Lite image) and its localize scripts |
 | `lite/intake/` | handover intake: dump normalization, `.ibd` recovery, assess |
-| `lite/sites/` | one folder per production site, each its own git repo (ignored here except `_template/` and `README.md`) |
+| `lite/sites/` | one local working folder per production site, made by `make site-add` (ignored here except `_template/` and `README.md`) |
 | `LOCALIZE.md` | design, runbook and troubleshooting for the production-site replicas |
 
 ## Quick start
@@ -70,8 +70,8 @@ The site-image and intake code depend only on the Lite image and the isle-buildk
 
 ## Production sites
 
-Each production Islandora Lite site runs as an add-on in `lite/sites/<site>/` (its own git
-repo): `make site-add SITE=<site>`, put the code, theme(s) and database handover in that
+Each production Islandora Lite site runs as an add-on in `lite/sites/<site>/` (a local,
+git-ignored working folder): `make site-add SITE=<site>`, put the code, theme(s) and database handover in that
 folder, then `make site-intake`, `make site-build`, `make site-up` with `SITE=<site>`.
 Handovers are composer project + database only: files are replaced by generic placeholders
 and accounts by the Lite dev site's. See `lite/sites/README.md` and `LOCALIZE.md`.

@@ -78,17 +78,20 @@ lite-upstream-pull: ## Lite: merge $(LITE_UPSTREAM_REMOTE)/main, then list mirro
 	git diff --stat ORIG_HEAD HEAD -- sample.env docker-compose.yml drupal/Dockerfile drupal/rootfs/etc || true
 
 # ---------------------------------------------------------------------------------------
-# Production-site replicas: lite/sites/<site>/ (each its own git repo). See LOCALIZE.md and
+# Production-site replicas: lite/sites/<site>/ (local working folders). See LOCALIZE.md and
 # lite/sites/README.md. All targets take SITE=<name>; the work is done by lite/bin/lite-site.
 # ---------------------------------------------------------------------------------------
 LITE_SITE := lite/bin/lite-site
-.PHONY: site-add site-render site-enable site-disable site-build site-up site-down site-intake site-finalize site-placeholders site-users-from-lite site-drush site-shell site-login site-db-shell site-dump site-reset sites
+.PHONY: site-add site-render site-check site-enable site-disable site-build site-up site-down site-intake site-finalize site-placeholders site-users-from-lite site-drush site-shell site-login site-db-shell site-dump site-reset sites
 
-site-add: ## Site: scaffold lite/sites/$(SITE)/ (site.env, docker-compose.yml, README, .gitignore) for a new site repo
+site-add: ## Site: scaffold lite/sites/$(SITE)/ (site.env, docker-compose.yml, README, NOTES.md) for a new site
 	$(LITE_SITE) add $(SITE)
 
 site-render: ## Site: re-render lite/sites/$(SITE)/docker-compose.yml from its site.env
 	$(LITE_SITE) render $(SITE)
+
+site-check: ## Site: validate the manual inputs (site.env, code, themes, database handover) before intake; read-only
+	$(LITE_SITE) check $(SITE)
 
 site-enable: ## Site: add the site to COMPOSE_FILE / COMPOSE_PROFILES in .env
 	$(LITE_SITE) enable $(SITE)

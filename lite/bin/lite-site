@@ -5,11 +5,11 @@
 #
 #   lite/bin/lite-site <command> <site> [args...]
 #
-# Commands: add render enable disable build up down intake finalize placeholders
+# Commands: add render check enable disable build up down intake finalize placeholders
 #           users-from-lite drush shell login db-shell dump reset list
 #
 # Design: see LOCALIZE.md and lite/sites/README.md. Everything about a site lives in
-# lite/sites/<site>/ (its own git repo). This script never clones code or themes: it
+# lite/sites/<site>/ (a local working folder). This script never clones code or themes: it
 # verifies that you put them there and tells you what is missing.
 set -euo pipefail
 
@@ -48,7 +48,7 @@ SITE_COMPOSE="$SITE_DIR/docker-compose.yml"
 # ---------------------------------------------------------------------------------------
 
 load_site_env() {
-  [ -f "$SITE_DIR/site.env" ] || die "$SITE_DIR/site.env not found. New site: make site-add SITE=$site. Existing site repo: git clone <site repo> $SITE_DIR"
+  [ -f "$SITE_DIR/site.env" ] || die "$SITE_DIR/site.env not found. Create it with: make site-add SITE=$site"
   set -a
   # shellcheck disable=SC1090
   . "$SITE_DIR/site.env"
@@ -115,18 +115,16 @@ require_site_running() {
 # ---------------------------------------------------------------------------------------
 
 cmd_add() {
-  [ -e "$SITE_DIR" ] && die "$SITE_DIR already exists (clone an existing site repo there, or pick another name)"
+  [ -e "$SITE_DIR" ] && die "$SITE_DIR already exists (pick another name, or make site-reset SITE=$site and remove the folder)"
   info "Scaffolding $SITE_DIR from $TEMPLATE_DIR"
   mkdir -p "$SITE_DIR"/{db,themes,site-files,repo}
   S="$site" perl -pe 's/__SITE__/$ENV{S}/g' "$TEMPLATE_DIR/site.env.sample" > "$SITE_DIR/site.env"
-  cp "$TEMPLATE_DIR/gitignore" "$SITE_DIR/.gitignore"
   S="$site" perl -pe 's/__SITE__/$ENV{S}/g' "$TEMPLATE_DIR/README.site.md" > "$SITE_DIR/README.md"
   cat > "$SITE_DIR/NOTES.md" <<EOF
 # $site: notes
 
 Created $(date +%F) with \`make site-add\`. \`make site-intake\` appends its assess report here.
 EOF
-  touch "$SITE_DIR/site-files/.gitkeep"
   cmd_render
   cat <<EOF
 
@@ -135,25 +133,50 @@ ${GREEN}Created $SITE_DIR${RESET}. Next:
   2. git clone <internal GitHub repo of the site>  $SITE_DIR/repo
   3. put each theme named in SITE_THEMES under     $SITE_DIR/themes/<name>/
   4. copy the database handover (mysqldump file or .tar.gz of .ibd files) into $SITE_DIR/db/
-  5. make site-intake SITE=$site && make site-build SITE=$site && make site-up SITE=$site
-  (make this folder a git repo of its own: cd $SITE_DIR && git init && git add -A && git commit -m "site $site")
+  5. make site-check SITE=$site     # validates 1-4; repeat until it passes
+  6. make site-intake SITE=$site && make site-build SITE=$site && make site-up SITE=$site
 EOF
 }
 
-cmd_render() {
-  load_site_env
+render_compose() {  # render_compose <out>: the site's compose file from the template + site.env
   local name prod
   name="$(printf '%s' "$SITE_NAME" | tr -d '"')"
   prod="$(printf '%s' "$PROD_DOMAIN" | tr -d '"')"
   S="$site" D="$SITE_DOMAIN" C="$SITE_SOLR_CORE" DB="$SITE_DB_NAME" N="$name" P="$prod" PH="$SITE_PLACEHOLDERS" B="$SITE_DB_BUFFER_POOL" \
     perl -pe 's/__SITE__/$ENV{S}/g; s/__DOMAIN__/$ENV{D}/g; s/__CORE__/$ENV{C}/g; s/__DB__/$ENV{DB}/g; s/__NAME__/$ENV{N}/g; s/__PROD_DOMAIN__/$ENV{P}/g; s/__PLACEHOLDERS__/$ENV{PH}/g; s/__BUFFER__/$ENV{B}/g' \
-    "$TEMPLATE_DIR/docker-compose.site.yml" > "$SITE_COMPOSE"
+    "$TEMPLATE_DIR/docker-compose.site.yml" > "$1"
+}
+
+cmd_render() {
+  load_site_env
+  render_compose "$SITE_COMPOSE"
   ok "rendered $SITE_COMPOSE (domain $SITE_DOMAIN, core $SITE_SOLR_CORE, db $SITE_DB_NAME)"
+}
+
+# Validate the manual inputs (site.env, code, themes, database handover, host) before
+# intake; read-only. The rendered compose file must match site.env and the template.
+cmd_check() {
+  load_site_env
+  local tmp rc=0
+  if [ ! -f "$SITE_COMPOSE" ]; then
+    echo "${RED}FAIL${RESET} $SITE_COMPOSE not found: make site-render SITE=$site"; rc=1
+  else
+    tmp="$(mktemp)"
+    render_compose "$tmp"
+    if cmp -s "$tmp" "$SITE_COMPOSE"; then
+      echo "${GREEN}ok${RESET}   $SITE_COMPOSE matches site.env and the template"
+    else
+      echo "${RED}FAIL${RESET} $SITE_COMPOSE is out of date with site.env or the template: make site-render SITE=$site"; rc=1
+    fi
+    rm -f "$tmp"
+  fi
+  LITE_CHECK_ERRORS="$rc" lite/intake/check.sh "$site" || rc=1
+  return "$rc"
 }
 
 cmd_enable() {
   require_env_file
-  [ -f "$SITE_COMPOSE" ] || die "$SITE_COMPOSE not found (make site-add SITE=$site, or clone the site repo there)"
+  [ -f "$SITE_COMPOSE" ] || die "$SITE_COMPOSE not found (make site-add SITE=$site)"
   local cf profiles
   cf="$(env_get COMPOSE_FILE)"; [ -n "$cf" ] || cf="$BASE_COMPOSE_FILES"
   if ! site_enabled; then cf="$cf:$SITE_COMPOSE"; fi
@@ -245,7 +268,8 @@ cmd_down() {
 }
 
 cmd_intake() {
-  load_site_env
+  cmd_check || die "fix the problems above before intake (make site-check SITE=$site)"
+  echo
   exec lite/intake/intake.sh "$site" "$@"
 }
 
@@ -343,6 +367,7 @@ cmd_list() {
 
 case "$cmd" in
   add) cmd_add ;;
+  check) cmd_check ;;
   render) cmd_render ;;
   enable) cmd_enable ;;
   disable) cmd_disable ;;

@@ -2,7 +2,7 @@
 # cloned here by `make lite-site`. Never commit it into this repo.
 drupal/rootfs/var/www/drupal/
 
-# Production-site replicas: each lite/sites/<site>/ is a clone of its own site repo.
+# Production-site replicas: each lite/sites/<site>/ is a local working folder (make site-add).
 sites/*
 !sites/_template/
 !sites/README.md

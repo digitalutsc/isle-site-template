@@ -1,8 +1,0 @@
-# Site repo for isle-site-lite: only site.env, docker-compose.yml, site-files/, NOTES.md
-# and README.md are tracked. Everything below is provided or generated locally.
-repo/
-themes/
-stage/
-db/
-db-raw/
-*.log

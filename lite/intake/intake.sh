@@ -30,7 +30,7 @@ die()   { echo "${RED}error${RESET} $*" >&2; exit 1; }
 
 site="${1:-}"; [ -n "$site" ] || die "usage: $0 <site>"
 SITE_DIR="lite/sites/$site"
-[ -f "$SITE_DIR/site.env" ] || die "$SITE_DIR/site.env not found (make site-add SITE=$site, or clone the site repo there)"
+[ -f "$SITE_DIR/site.env" ] || die "$SITE_DIR/site.env not found (make site-add SITE=$site)"
 [ -f "$SITE_DIR/docker-compose.yml" ] || die "$SITE_DIR/docker-compose.yml not found: make site-render SITE=$site"
 set -a
 # shellcheck disable=SC1090
@@ -60,8 +60,13 @@ or point SITE_CODE_DIR in $SITE_DIR/site.env at an existing checkout.
 EOF
   exit 1
 fi
-code_commit="$(git -C "$CODE" rev-parse --short HEAD 2>/dev/null || echo 'not a git checkout')"
-code_branch="$(git -C "$CODE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '-')"
+# Only when $CODE is the top of its own checkout (a copy without .git sits inside this repo).
+if [ "$(git -C "$CODE" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$CODE" && pwd -P)" ]; then
+  code_commit="$(git -C "$CODE" rev-parse --short HEAD 2>/dev/null || echo 'no commits')"
+  code_branch="$(git -C "$CODE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '-')"
+else
+  code_commit='not a git checkout'; code_branch='-'
+fi
 rm -rf "$STAGE"
 mkdir -p "$STAGE/config"
 cp -R "$CODE/config/sync" "$STAGE/config/sync"
