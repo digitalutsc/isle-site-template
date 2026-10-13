@@ -50,3 +50,17 @@ services:
       # config volume at a second path: Solr then sees the same core twice and its
       # CoreContainer shuts down on restart.
       DRUPAL_DEFAULT_TRIPLESTORE_NAMESPACE: islandora
+
+  # Production-site replicas (lite/sites/<site>/) share one Solr core like prod does.
+  # The core directory lives on this volume; each site's drupal-<site> container mounts
+  # it at the same path so search_api_solr can write the core config there.
+  solr:
+    volumes:
+      - type: volume
+        source: solr-core-dsu_multisite
+        target: /opt/solr/server/solr/dsu_multisite
+        volume:
+          nocopy: true
+
+volumes:
+  solr-core-dsu_multisite: {}

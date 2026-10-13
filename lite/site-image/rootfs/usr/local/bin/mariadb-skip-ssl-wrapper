@@ -1,0 +1,17 @@
+#!/bin/sh
+# Shadows /usr/bin/{mariadb,mariadb-dump,mysql,mysqldump} (symlinked to this file).
+#
+# The MariaDB 11 CLI client requires TLS by default and cannot verify MySQL 8's
+# self-signed certificate. drush sql:* passes its own --defaults-file, which makes
+# the client ignore /etc/my.cnf.d, so the only reliable place to add --skip-ssl is
+# here. Drupal itself connects through PHP mysqlnd and is unaffected. The db is
+# only reachable on this project's internal network.
+real="/usr/bin/$(basename "$0")"
+case "$1" in
+    --defaults-file=*|--defaults-extra-file=*|--no-defaults)
+        # These must stay the first argument.
+        first="$1"; shift
+        exec "$real" "$first" --skip-ssl "$@"
+        ;;
+esac
+exec "$real" --skip-ssl "$@"

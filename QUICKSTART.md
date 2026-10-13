@@ -1,0 +1,76 @@
+# QUICKSTART: a production-site replica
+
+The per-site workflow from [LOCALIZE.md §4](LOCALIZE.md#4-per-site-workflow), ready to
+copy. The example site is `memory`. Run everything from the repository root. The design,
+first-start steps and troubleshooting table are in `LOCALIZE.md`; the short operator
+guide is `lite/sites/README.md`.
+
+## 1. The stack (once)
+
+```bash
+make lite-init && make lite-up
+```
+
+## 2. A new site
+
+```bash
+make site-add SITE=memory                  # scaffold lite/sites/memory/
+# edit lite/sites/memory/site.env, then:
+make site-render SITE=memory
+```
+
+`site.env` keys: `SITE_DOMAIN`, `SITE_CODE_DIR`, `SITE_SOLR_CORE` (`dsu_multisite` =
+shared, `<site>` = own), `SITE_THEMES`, `SITE_DB_NAME`, `SITE_NAME`, `PROD_DOMAIN`,
+`SKIP_TABLES`, `SITE_PLACEHOLDERS` (`relink` | `per-file` | `false`), `SITE_DB_BUFFER_POOL`.
+
+## 3. Your manual inputs
+
+```bash
+git clone <internal GitHub repo> lite/sites/memory/repo                        # or set SITE_CODE_DIR
+git clone <theme repo> lite/sites/memory/themes/dsu_subtheme_barrioDepartments  # every name in SITE_THEMES
+cp <handover: *.sql | *.sql.gz | *.sql.xz | *.tar.gz of .ibd> lite/sites/memory/db/
+```
+
+## 4. Validate (read-only)
+
+```bash
+make site-check SITE=memory    # repeat until it prints "Ready for intake"
+```
+
+## 5. Deploy
+
+```bash
+make site-deploy SITE=memory   # site-intake + site-build + site-up; stops at the first failing step
+make site-login  SITE=memory   # or log in as admin with secrets/DRUPAL_DEFAULT_ACCOUNT_PASSWORD
+make site-drush  SITE=memory CMD="search-api:index"   # index into Solr (takes a while)
+```
+
+The site is at `http://memory.islandora.io`. The three steps still exist on their own
+(`make site-intake`, `make site-build`, `make site-up`) if you need to re-run just one.
+
+## Rebuild
+
+After changing the site's code, themes or `site-files/`, or the Lite image:
+
+```bash
+make site-deploy SITE=memory   # restages, rebuilds and recreates drupal-memory; database and files are kept
+```
+
+Intake reuses the normalized dump in `db/`; add `FORCE=1` to rebuild it from the handover.
+The first-start localization does not run again; `make site-finalize SITE=memory` re-runs it.
+
+Start over from the handover (destructive for this site only):
+
+```bash
+make site-reset SITE=memory && make site-deploy SITE=memory
+```
+
+## Everyday
+
+```bash
+make sites                                   # sites with enabled/running state
+make site-drush SITE=memory CMD="status"
+make site-shell SITE=memory
+make site-down  SITE=memory / make site-up SITE=memory   # stop / start, volumes kept
+make down / make up                          # whole stack, enabled sites included
+```
