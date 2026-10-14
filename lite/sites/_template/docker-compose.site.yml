@@ -149,6 +149,9 @@ services:
       - drupal-__SITE__-private:/var/www/drupal/private
       # Solr core config is generated here by search_api_solr and read by the solr service.
       - solr-core-__CORE__:/opt/solr/server/solr/__CORE__:z,rw
+      # SITE_DEV_MOUNTS=true in site.env: read-only bind mounts of the themes and custom
+      # code from the host for live editing (rendered below; nothing when false).
+      #__DEV_MOUNTS__
     networks:
       default:
 

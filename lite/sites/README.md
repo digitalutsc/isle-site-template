@@ -55,6 +55,9 @@ Everyday: `make sites`, `make site-drush SITE=memory CMD="status"`, `make site-s
 `make site-dump DEST=...`, `make site-down`, `make site-disable`, `make site-reset`
 (destructive for that site only: containers, volumes, image, stage, normalized dump).
 
+Live editing of themes and custom code without rebuilds: `SITE_DEV_MOUNTS=true` in `site.env`, then
+`make site-render` and `make site-up` (read-only bind mounts; see `lite/MOUNTS.md`).
+
 Plain `make up` / `make down` include enabled sites (they are in `COMPOSE_FILE` and
 `COMPOSE_PROFILES` of `.env`). `make clean` (upstream, destructive) removes site volumes too.
 
