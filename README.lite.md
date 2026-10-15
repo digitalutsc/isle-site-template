@@ -36,8 +36,16 @@ Site: http://islandora.io (admin password: `cat secrets/DRUPAL_DEFAULT_ACCOUNT_P
 Dev-mode URLs: http://solr.islandora.io, http://blazegraph.islandora.io/bigdata/,
 http://islandora.io/cantaloupe/iiif/2/, http://traefik.islandora.io.
 
-HTTPS: `make traefik-https-mkcert && make down-traefik up && make lite-hydrate`
-(and `make site-finalize SITE=<site>` for each replica).
+HTTPS: `make traefik-https-mkcert && make lite-certs && docker compose up -d --force-recreate`, then
+`make lite-hydrate` (and `make site-finalize SITE=<site>` for each replica).
+
+Certificates: upstream `make init` (run by every `make lite-init`/`lite-up`) signs `certs/cert.pem`
+with a CA that mkcert creates inside a throwaway container, which nothing on the host trusts.
+`make lite-init` therefore ends with `make lite-certs` (`lite/bin/lite-certs`), which re-issues the
+certificate with the host's own mkcert CA (`brew install mkcert nss`; it runs `mkcert -install` if needed)
+and copies that CA to `certs/rootCA.pem` for the containers. It also deletes any copy of the host CA's
+private key from `certs/`. Run `make lite-certs` yourself after a plain upstream `make init` or
+`make traefik-https-mkcert`. If it reports that `rootCA.pem` changed, recreate the containers.
 
 ## Everyday
 

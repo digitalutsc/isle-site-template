@@ -33,7 +33,7 @@ ROOT_PW="recover"
 LOGDIR="$SITE_DIR/db/incoming/recovery-$(date +%Y%m%d-%H%M)"
 
 say() { echo "   [ibd-recover] $*"; }
-cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
+cleanup() { docker rm -fv "$NAME" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 # 1. extract -------------------------------------------------------------------------------
@@ -71,19 +71,21 @@ docker exec "$NAME" bash /import-ibd.sh || say "import-ibd.sh reported failures;
 
 # 4. INSTANT-DDL tables through ibd2sql ---------------------------------------------------
 if [ -s "$WORK/failed.txt" ]; then
-  while read -r table; do
+  while read -r table _; do  # failed.txt lines are "<table> <step>" (import-ibd.sh)
     [ -n "$table" ] || continue
     say "recover-table $table (ddcw/ibd2sql)"
     docker run --rm -v "$IBD_ABS:/d:ro" -v "$WORK_ABS:/work" python:3.12-slim sh -c '
       python3 -c "import urllib.request,tarfile,io; tarfile.open(fileobj=io.BytesIO(urllib.request.urlopen(\"https://github.com/ddcw/ibd2sql/archive/refs/heads/main.tar.gz\").read())).extractall(\"/tmp\")" && \
       cd /tmp/ibd2sql-main && python3 main.py /d/'"$table"'.ibd --sql --complete-insert > /work/'"$table"'.sql' \
       2> "$WORK/$table.ibd2sql.log" || { say "ibd2sql failed for $table (see $WORK/$table.ibd2sql.log); table stays empty"; continue; }
-    # ibd2sql qualifies inserts with the source schema name.
-    if [ "$schema_ref" != "$DB" ]; then
-      SR="$schema_ref" D="$DB" perl -pi -e 's/^INSERT INTO `\Q$ENV{SR}\E`\./INSERT INTO `$ENV{D}`./' "$WORK/$table.sql"
+    # ibd2sql qualifies inserts with the source schema name, decoded from the directory name
+    # ("drrp@002ddragomans" -> `drrp-dragomans`), so match any qualifier, not $schema_ref.
+    D="$DB" perl -pi -e 's/^INSERT INTO `[^`]+`\./INSERT INTO `$ENV{D}`./' "$WORK/$table.sql"
+    if docker exec "$NAME" bash -c "mysql -uroot -p'$ROOT_PW' $DB -e 'SET foreign_key_checks=0; TRUNCATE TABLE \`$table\`; SOURCE /work/$table.sql;'"; then
+      say "$table: $(docker exec "$NAME" mysql -uroot -p"$ROOT_PW" -N "$DB" -e "SELECT COUNT(*) FROM \`$table\`" 2>/dev/null) rows"
+    else
+      say "loading $WORK/$table.sql failed; table stays empty"
     fi
-    docker exec "$NAME" bash -c "mysql -uroot -p'$ROOT_PW' $DB -e 'SET foreign_key_checks=0; TRUNCATE TABLE \`$table\`; SOURCE /work/$table.sql;'" \
-      && say "$table: $(docker exec "$NAME" mysql -uroot -p"$ROOT_PW" -N "$DB" -e "SELECT COUNT(*) FROM \`$table\`" 2>/dev/null) rows"
   done < "$WORK/failed.txt"
 fi
 

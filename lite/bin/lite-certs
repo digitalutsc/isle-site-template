@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+#
+# Make certs/ hold a certificate signed by this host's mkcert CA, so browsers and curl on the
+# host trust https://<DOMAIN> and https://<site>.<DOMAIN>. Normally run by `make lite-certs`
+# (and by `make lite-init`, right after upstream `make init`). Idempotent: does nothing when
+# certs/ already matches the host CA.
+#
+# Why: upstream `make init` runs scripts/generate-certs.sh inside a throwaway islandora/base
+# container. mkcert there creates a new CA on every run, trusted by nobody but that container,
+# and signs certs/cert.pem with it. certs/rootCA.pem is copied only when missing, so after a
+# second init it no longer even matches the CA that signed cert.pem. `make lite-up` runs init
+# every time, so the certificate is re-signed by a throwaway CA on every start.
+#
+# Owner rule: the host CA's private key is never kept in certs/ (no container uses it, and
+# anyone holding it can impersonate any site to this host). A copy left by upstream
+# generate-certs.sh run on the host is removed.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RESET=$'\033[0m'
+ok()   { echo "${GREEN}ok${RESET}  $*"; }
+warn() { echo "${YELLOW}warn${RESET} $*" >&2; }
+
+if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
+  warn "WSL: mkcert is not supported there (upstream). certs/ keeps the init container's certificate; stay on http."
+  exit 0
+fi
+if ! command -v mkcert >/dev/null 2>&1; then
+  warn "mkcert is not installed on this host, so certs/ keeps the init container's certificate,"
+  warn "which browsers do not trust. Install it (macOS: brew install mkcert nss), then: make lite-certs"
+  exit 0
+fi
+
+CAROOT="$(mkcert -CAROOT)"
+HOST_CA="$CAROOT/rootCA.pem"
+if [ ! -f "$HOST_CA" ]; then
+  echo "Creating this host's mkcert CA and adding it to the system trust store (may ask for your password)"
+  mkcert -install
+fi
+
+domain="$(grep -E '^DOMAIN=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"' || true)"
+[ -n "$domain" ] || domain=islandora.io
+# Upstream generate-certs.sh's names, plus DOMAIN when .env changed it.
+names=("*.islandora.io" "islandora.io" "*.islandora.info" "islandora.info" "localhost" "127.0.0.1" "::1")
+case " ${names[*]} " in *" $domain "*) ;; *) names+=("*.$domain" "$domain") ;; esac
+
+if [ -f certs/rootCA-key.pem ] && cmp -s certs/rootCA-key.pem "$CAROOT/rootCA-key.pem"; then
+  rm -f certs/rootCA-key.pem
+  ok "removed certs/rootCA-key.pem (a copy of this host's CA private key; nothing uses it)"
+fi
+
+cert_ok() {
+  [ -s certs/cert.pem ] && [ -s certs/privkey.pem ] || return 1
+  openssl verify -CAfile "$HOST_CA" certs/cert.pem >/dev/null 2>&1 || return 1
+  cmp -s "$HOST_CA" certs/rootCA.pem || return 1
+  openssl x509 -in certs/cert.pem -noout -checkend 604800 >/dev/null 2>&1 || return 1
+  local sans; sans="$(openssl x509 -in certs/cert.pem -noout -ext subjectAltName 2>/dev/null)"
+  case "$sans" in *"DNS:*.$domain"*) ;; *) return 1 ;; esac
+}
+
+if cert_ok; then
+  ok "certs/cert.pem is signed by this host's mkcert CA ($HOST_CA)"
+  exit 0
+fi
+
+mkdir -p certs
+ca_changed=false
+cmp -s "$HOST_CA" certs/rootCA.pem 2>/dev/null || ca_changed=true
+# Write in place (no rm): Compose bind-mounts these files as secrets into running containers,
+# and a new inode would leave them reading the old content.
+cat "$HOST_CA" > certs/rootCA.pem
+mkcert -cert-file certs/cert.pem -key-file certs/privkey.pem "${names[@]}" 2>&1 | grep -vE '^$' || true
+openssl verify -CAfile "$HOST_CA" certs/cert.pem >/dev/null || { echo "${RED}error${RESET} certs/cert.pem does not verify against $HOST_CA" >&2; exit 1; }
+ok "certs/cert.pem re-issued by this host's mkcert CA for: ${names[*]}"
+
+if $ca_changed && [ -n "$(docker compose ps -q 2>/dev/null || true)" ]; then
+  # Traefik keeps the old certificate in memory, and every container imports
+  # CERT_AUTHORITY (certs/rootCA.pem) into its trust store only when it starts.
+  warn "certs/rootCA.pem changed while the stack is running. Recreate the containers so they use it:"
+  warn "  docker compose up -d --force-recreate"
+fi

@@ -118,6 +118,9 @@ test-starts it; `site-up` recreates `cantaloupe` when it changed. `assess.sh` ap
 
 - macOS: upstream scripts need GNU `timeout`; `custom.Makefile` puts `lite/bin/timeout` (perl shim) on
   `PATH` when missing. Use BSD-safe shell: POSIX classes (`[[:space:]]`), not `\s`.
+- Upstream `make init` (run by every `lite-init`/`lite-up`) signs `certs/cert.pem` with a throwaway CA
+  made inside its container; `make lite-certs` (`lite/bin/lite-certs`, run at the end of `lite-init`)
+  re-issues it with the host's mkcert CA so https is trusted. It never keeps the host CA key in `certs/`.
 - MySQL 8's self-signed cert breaks the MariaDB clients in the image: the site image symlinks every
   `mysql*`/`mariadb*` client to `mariadb-skip-ssl-wrapper`.
 - `drush` and `composer` run inside containers (`docker compose exec -T drupal with-contenv bash -lc '...'`),

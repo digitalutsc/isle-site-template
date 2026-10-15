@@ -14,13 +14,14 @@ ifeq ($(shell command -v timeout 2>/dev/null),)
 export PATH := $(CURDIR)/lite/bin:$(PATH)
 endif
 
-.PHONY: lite-init lite-site lite-up lite-ping lite-cantaloupe lite-hydrate lite-drush lite-shell lite-login lite-status lite-upstream-check lite-upstream-pull
+.PHONY: lite-init lite-site lite-certs lite-up lite-ping lite-cantaloupe lite-hydrate lite-drush lite-shell lite-login lite-status lite-upstream-check lite-upstream-pull
 
 lite-init: ## Lite: create .env + override symlink, fetch the site, then upstream init (secrets, certs, build)
 	if [ ! -f .env ]; then cp lite/env.sample .env; echo "Created .env from lite/env.sample"; fi
 	if [ ! -e docker-compose.override.yml ]; then ln -s docker-compose.lite.yml docker-compose.override.yml; echo "Linked docker-compose.override.yml -> docker-compose.lite.yml"; fi
 	$(MAKE) lite-site
 	$(MAKE) init
+	$(MAKE) lite-certs
 
 lite-site: ## Lite: clone islandora-lite-site into the build context (if missing) and copy the complete composer.lock over it
 	if [ ! -d "$(LITE_SITE_DIR)/.git" ]; then \
@@ -31,6 +32,9 @@ lite-site: ## Lite: clone islandora-lite-site into the build context (if missing
 	fi
 	cp lite/site/composer.lock "$(LITE_SITE_DIR)/"
 	echo "Applied lite/site overlay (composer.lock: the committed drupal-11 lock lacks the composer_site.json packages)"
+
+lite-certs: ## Lite: (re)issue certs/cert.pem with this host's mkcert CA so browsers trust https (upstream init signs it with a throwaway CA)
+	lite/bin/lite-certs
 
 lite-up: lite-init ## Lite: lite-init then upstream up (falls back to lite-ping where upstream ping.sh cannot run)
 	$(MAKE) up || $(MAKE) lite-ping

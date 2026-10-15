@@ -292,6 +292,9 @@ upstream (remote `upstream` if present, else `origin`).
 | `WARN: no uid 1 account` | `drush sql:query` prints a trailing blank line | `awk 'NF {v=$0} END {print v}'` |
 | `make lite-upstream-check` cannot fetch | SSH remote without a key in this shell | fetch failure is a warning; compare against the last fetched ref |
 | `make up` on macOS fails/hangs after install | upstream scripts need GNU `timeout` | `lite/bin/timeout` on PATH when missing |
+| replica 500 `Html::escape(): Argument #1 ($text) must be of type string, null given` in the main menu; `file_managed` empty although intake listed it as recovered | `import-ibd.sh` writes `failed.txt` as `<table> <step>`; `ibd-recover.sh` read the whole line as the table name, so `ibd2sql` never ran and every INSTANT-DDL table stayed empty | `while read -r table _` |
+| one table still empty after `recover-table`, no error | the schema directory is filename-encoded (`drrp@002ddragomans`) but `ibd2sql` qualifies INSERTs with the decoded name, so the rewrite missed and the load failed silently | rewrite any `INSERT INTO \`<schema>\`.` qualifier; a failed load is reported |
+| Docker disk fills over several intakes; dangling 64-hex volumes the size of each database | the throwaway recovery MySQL was removed with `docker rm -f`, leaving its anonymous data volume | `docker rm -fv` |
 | viewer: CORS "Request header field token is not allowed" (logged in) | Mirador sends `Authorization` + `token`; Cantaloupe's preflight allows only `Authorization`, and `islandora.io/cantaloupe` is cross-origin for `<site>.islandora.io` | each site routes `/cantaloupe` on its own host (`<site>-cantaloupe` router) and uses it as `DRUPAL_DEFAULT_CANTALOUPE_URL` |
 
 ## 12. History
